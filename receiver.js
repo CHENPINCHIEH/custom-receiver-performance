@@ -12,7 +12,9 @@ const TEST_STREAM_TYPE = StreamType.DASH;
 
 // Debug Logger
 const castDebugLogger = cast.debug.CastDebugLogger.getInstance();
-const LOG_TAG = "MyAPP.LOG";
+const LOG_TAG = "My.LOG";
+const LOG_TAG_PERFORMANCE = "Performance.LOG";
+
 
 // Enable debug logger and show a 'DEBUG MODE' overlay at top left corner.
 castDebugLogger.setEnabled(true);
@@ -20,121 +22,115 @@ castDebugLogger.setEnabled(true);
 // Show debug overlay
 // castDebugLogger.showDebugLogs(true);
 
-// Set verbosity level for Core events.
 castDebugLogger.loggerLevelByEvents = {
-  "cast.framework.events.category.CORE": cast.framework.LoggerLevel.INFO,
-  "cast.framework.events.EventType.MEDIA_STATUS":
-    cast.framework.LoggerLevel.DEBUG,
+  // 先預設debug等級，之後可以根據事件類型調整
+  
+  // 當發生核心事件（如播放、暫停、錯誤）
+  'cast.framework.events.category.CORE': cast.framework.LoggerLevel.DEBUG,
+  
+  // 當媒體狀態改變（如換歌、播完）
+  'cast.framework.events.EventType.MEDIA_STATUS': cast.framework.LoggerLevel.DEBUG
 };
 
-// Set verbosity level for custom tags.
 castDebugLogger.loggerLevelByTags = {
   LOG_TAG: cast.framework.LoggerLevel.DEBUG,
 };
 
-function makeRequest(method, url) {
-  return new Promise(function (resolve, reject) {
-    let xhr = new XMLHttpRequest();
-    xhr.open(method, url);
-    xhr.onload = function () {
-      if (this.status >= 200 && this.status < 300) {
-        resolve(JSON.parse(xhr.response));
-      } else {
-        reject({
-          status: this.status,
-          statusText: xhr.statusText,
-        });
-      }
-    };
-    xhr.onerror = function () {
-      reject({
-        status: this.status,
-        statusText: xhr.statusText,
-      });
-    };
-    xhr.send();
-  });
+async function makeRequest(method, url) {
+  try {
+    const response = await fetch(url, { method });
+
+    if (!response.ok) {
+      throw {
+        status: response.status,
+        statusText: response.statusText,
+      };
+    }
+    return await response.json();
+  } catch (error) {
+    // 這裡會捕捉到網路錯誤或是上面 throw 的錯誤
+    throw error; 
+  }
 }
 
 playerManager.setMessageInterceptor(
   cast.framework.messages.MessageType.LOAD,
-  (request) => {
+  async (request) => {
     castDebugLogger.info(LOG_TAG, "Intercepting LOAD request");
 
-    // Map contentId to entity
-    if (request.media && request.media.entity) {
+    // Map contentId to entity (簡化賦值)
+    // for smart display, we use entity to identify the content, so we need to map it to contentId for later use
+    if (request.media?.entity) {
       request.media.contentId = request.media.entity;
     }
 
-    return new Promise((resolve, reject) => {
-      // Fetch repository metadata
-      makeRequest("GET", SAMPLE_URL).then(function (data) {
-        // Obtain resources by contentId from downloaded repository metadata.
-        let item = data[request.media.contentId];
-        if (!item) {
-          // Content could not be found in repository
-          castDebugLogger.error(LOG_TAG, "Content not found");
-          reject();
-        } else {
-          // Adjusting request to make requested content playable
-          request.media.contentType = TEST_STREAM_TYPE;
+    try {
+      // 2. 使用 await 呼叫我們先前改寫好的 makeRequest (fetch 版本)
+      const data = await makeRequest("GET", SAMPLE_URL);
+      const item = data[request.media.contentId];
 
-          // Configure player to parse DASH content
-          if (TEST_STREAM_TYPE == StreamType.DASH) {
-            request.media.contentUrl = item.stream.dash;
-          }
+      if (!item) {
+        castDebugLogger.error(LOG_TAG, "Content not found");
+        // 在 interceptor 中拋出錯誤或回傳 null 即可停止載入
+        return null; 
+      }
 
-          // Configure player to parse HLS content
-          else if (TEST_STREAM_TYPE == StreamType.HLS) {
-            request.media.contentUrl = item.stream.hls;
-            request.media.hlsSegmentFormat =
-              cast.framework.messages.HlsSegmentFormat.FMP4;
-            request.media.hlsVideoSegmentFormat =
-              cast.framework.messages.HlsVideoSegmentFormat.FMP4;
-          }
+      // 3. 設定串流類型與 URL
+      request.media.contentType = TEST_STREAM_TYPE;
 
-          castDebugLogger.warn(
-            LOG_TAG,
-            "Playable URL:",
-            request.media.contentUrl
-          );
+      if (TEST_STREAM_TYPE === StreamType.DASH) {
+        request.media.contentUrl = item.stream.dash;
+      } else if (TEST_STREAM_TYPE === StreamType.HLS) {
+        request.media.contentUrl = item.stream.hls;
+        request.media.hlsSegmentFormat = cast.framework.messages.HlsSegmentFormat.FMP4;
+        request.media.hlsVideoSegmentFormat = cast.framework.messages.HlsVideoSegmentFormat.FMP4;
+      }
 
-          // Add metadata
-          let metadata = new cast.framework.messages.GenericMediaMetadata();
-          metadata.title = item.title;
-          metadata.subtitle = item.author;
+      castDebugLogger.warn(LOG_TAG, "Playable URL:", request.media.contentUrl);
 
-          request.media.metadata = metadata;
+      // 4. 設定 Metadata (使用物件簡寫)
+      request.media.metadata = new cast.framework.messages.GenericMediaMetadata();
+      request.media.metadata.title = item.title;
+      request.media.metadata.subtitle = item.author;
 
-          // Resolve request
-          resolve(request);
-        }
-      });
-    });
+      // 5. 直接回傳修改後的 request，async 函數會自動包裝成 Resolved Promise
+      return request;
+
+    } catch (error) {
+      castDebugLogger.error(LOG_TAG, "Request failed", error);
+      return null; // 發生錯誤時攔截並停止載入
+    }
   }
 );
-
 // Optimizing for smart displays
 const touchControls = cast.framework.ui.Controls.getInstance();
 const playerData = new cast.framework.ui.PlayerData();
 const playerDataBinder = new cast.framework.ui.PlayerDataBinder(playerData);
 
-let browseItems = getBrowseItems();
+let browseItems = await getBrowseItems();
 
-function getBrowseItems() {
-  let browseItems = [];
-  makeRequest("GET", SAMPLE_URL).then(function (data) {
-    for (let key in data) {
-      let item = new cast.framework.ui.BrowseItem();
+async function getBrowseItems() {
+  try {
+    // 1. 等待資料抓取完成
+    const data = await makeRequest("GET", SAMPLE_URL);
+    
+    // 2. 使用 .map() 代替 for...in，語法更簡潔且具備函數式編程風格
+    // Object.entries(data) 會同時給你 [key, value]
+    const browseItems = Object.entries(data).map(([key, value]) => {
+      const item = new cast.framework.ui.BrowseItem();
       item.entity = key;
-      item.title = data[key].title;
-      item.subtitle = data[key].description;
-      item.image = new cast.framework.messages.Image(data[key].poster);
+      item.title = value.title;
+      item.subtitle = value.description;
+      item.image = new cast.framework.messages.Image(value.poster);
       item.imageType = cast.framework.ui.BrowseImageType.MOVIE;
-      browseItems.push(item);
-    }
-  });
-  return browseItems;
+      return item;
+    });
+
+    return browseItems;
+  } catch (error) {
+    console.error("Failed to fetch browse items:", error);
+    return []; // 發生錯誤時回傳空陣列，防止程式崩潰
+  }
 }
 
 let browseContent = new cast.framework.ui.BrowseContent();
