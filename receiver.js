@@ -143,8 +143,9 @@ getBrowseItems().then(browseItems => {
     }
   );
 
-  context.start();
 });
+
+context.start();
 
 async function getBrowseItems() {
   try {
