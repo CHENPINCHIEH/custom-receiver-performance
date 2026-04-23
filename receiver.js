@@ -10,28 +10,28 @@ const StreamType = {
 const TEST_STREAM_TYPE = StreamType.DASH;
 
 // Debug Logger Tags
-const castDebugLogger = cast.debug.CastDebugLogger.getInstance();
-const LOG_TAG = "My.LOG";
-const PERF_METRIC = "Performance.LOG";
+// const castDebugLogger = cast.debug.CastDebugLogger.getInstance();
+// const LOG_TAG = "My.LOG";
+// const PERF_METRIC = "Performance.LOG";
 
 // 效能監測全域變數
 let t0_startTime = 0;
 
-castDebugLogger.setEnabled(true);
+// castDebugLogger.setEnabled(true);
 
-castDebugLogger.loggerLevelByEvents = {
-  'cast.framework.events.category.CORE': cast.framework.LoggerLevel.DEBUG,
-  'cast.framework.events.EventType.MEDIA_STATUS': cast.framework.LoggerLevel.DEBUG
-};
+// castDebugLogger.loggerLevelByEvents = {
+//   'cast.framework.events.category.CORE': cast.framework.LoggerLevel.DEBUG,
+//   'cast.framework.events.EventType.MEDIA_STATUS': cast.framework.LoggerLevel.DEBUG
+// };
 
-castDebugLogger.loggerLevelByTags = {
-  [LOG_TAG]: cast.framework.LoggerLevel.DEBUG,
-  [PERF_METRIC]: cast.framework.LoggerLevel.DEBUG,
-};
+// castDebugLogger.loggerLevelByTags = {
+//   [LOG_TAG]: cast.framework.LoggerLevel.DEBUG,
+//   [PERF_METRIC]: cast.framework.LoggerLevel.DEBUG,
+// };
 
 async function makeRequest(method, url) {
   // const api_start = performance.now();
-  castDebugLogger.info(PERF_METRIC, "  -> API Request Sent");
+  // castDebugLogger.info(PERF_METRIC, "  -> API Request Sent");
   
   try {
     const response = await fetch(url, { method });
@@ -57,7 +57,7 @@ playerManager.setMessageInterceptor(
   async (request) => {
     // [T0] 啟動監測
     // t0_startTime = performance.now();
-    castDebugLogger.warn(PERF_METRIC, "T0: LOAD Request Received");
+    // castDebugLogger.warn(PERF_METRIC, "T0: LOAD Request Received");
 
     if (request.media?.entity) {
       request.media.contentId = request.media.entity;
@@ -68,7 +68,7 @@ playerManager.setMessageInterceptor(
       const item = data[request.media.contentId];
 
       if (!item) {
-        castDebugLogger.error(LOG_TAG, "Content not found");
+        // castDebugLogger.error(LOG_TAG, "Content not found");
         return null; 
       }
 
@@ -93,7 +93,7 @@ playerManager.setMessageInterceptor(
       return request;
 
     } catch (error) {
-      castDebugLogger.error(LOG_TAG, "Request failed", error);
+      // castDebugLogger.error(LOG_TAG, "Request failed", error);
       return null;
     }
   }
