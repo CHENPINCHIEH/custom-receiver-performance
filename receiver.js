@@ -30,15 +30,15 @@ castDebugLogger.loggerLevelByTags = {
 };
 
 async function makeRequest(method, url) {
-  const api_start = performance.now();
+  // const api_start = performance.now();
   castDebugLogger.info(PERF_METRIC, "  -> API Request Sent");
   
   try {
     const response = await fetch(url, { method });
 
-    const api_end = performance.now();
-    const api_duration = (api_end - api_start).toFixed(2);
-    castDebugLogger.info(PERF_METRIC, `  <- API Response Received. Duration: ${api_duration}ms`);
+    // const api_end = performance.now();
+    // const api_duration = (api_end - api_start).toFixed(2);
+    // castDebugLogger.info(PERF_METRIC, `  <- API Response Received. Duration: ${api_duration}ms`);
 
     if (!response.ok) {
       throw { status: response.status, statusText: response.statusText };
@@ -56,7 +56,7 @@ playerManager.setMessageInterceptor(
   cast.framework.messages.MessageType.LOAD,
   async (request) => {
     // [T0] 啟動監測
-    t0_startTime = performance.now();
+    // t0_startTime = performance.now();
     castDebugLogger.warn(PERF_METRIC, "T0: LOAD Request Received");
 
     if (request.media?.entity) {
@@ -86,9 +86,9 @@ playerManager.setMessageInterceptor(
       request.media.metadata.subtitle = item.author;
 
       // [T1] 攔截器邏輯處理完成
-      const t1_time = performance.now();
-      const loadProcessDuration = (t1_time - t0_startTime).toFixed(2);
-      castDebugLogger.warn(PERF_METRIC, `T1: Data Ready. Process Duration: ${loadProcessDuration}ms`);
+      // const t1_time = performance.now();
+      // const loadProcessDuration = (t1_time - t0_startTime).toFixed(2);
+      // castDebugLogger.warn(PERF_METRIC, `T1: Data Ready. Process Duration: ${loadProcessDuration}ms`);
 
       return request;
 
@@ -107,13 +107,13 @@ playerManager.addEventListener(
   (event) => {
     if (event.playerState === cast.framework.messages.PlayerState.PLAYING && t0_startTime > 0) {
       // [T2] 影片正式開始播放
-      const t2_time = performance.now();
-      const totalStartupTime = (t2_time - t0_startTime).toFixed(2);
+      // const t2_time = performance.now();
+      // const totalStartupTime = (t2_time - t0_startTime).toFixed(2);
       
-      castDebugLogger.warn(PERF_METRIC, `T2: Video Playing (First Frame). Total Startup Latency: ${totalStartupTime}ms`);
+      // castDebugLogger.warn(PERF_METRIC, `T2: Video Playing (First Frame). Total Startup Latency: ${totalStartupTime}ms`);
       
-      // 重置起始時間，避免重複計算 (例如暫停後再播放)
-      t0_startTime = 0;
+      // // 重置起始時間，避免重複計算 (例如暫停後再播放)
+      // t0_startTime = 0;
     }
   }
 );
