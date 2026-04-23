@@ -1,83 +1,78 @@
 const context = cast.framework.CastReceiverContext.getInstance();
 const playerManager = context.getPlayerManager();
 
-//Media Sample API Values
-const SAMPLE_URL =
-  "https://storage.googleapis.com/cpe-sample-media/content.json";
+// Media Sample API Values
+const SAMPLE_URL = "https://storage.googleapis.com/cpe-sample-media/content.json";
 const StreamType = {
   DASH: "application/dash+xml",
   HLS: "application/x-mpegurl",
 };
 const TEST_STREAM_TYPE = StreamType.DASH;
 
-// Debug Logger
+// Debug Logger Tags
 const castDebugLogger = cast.debug.CastDebugLogger.getInstance();
 const LOG_TAG = "My.LOG";
-const LOG_TAG_PERFORMANCE = "Performance.LOG";
+const PERF_METRIC = "Performance.LOG";
 
+// 效能監測全域變數
+let t0_startTime = 0;
 
-// Enable debug logger and show a 'DEBUG MODE' overlay at top left corner.
 castDebugLogger.setEnabled(true);
 
-// Show debug overlay
-// castDebugLogger.showDebugLogs(true);
-
 castDebugLogger.loggerLevelByEvents = {
-  // 先預設debug等級，之後可以根據事件類型調整
-  
-  // 當發生核心事件（如播放、暫停、錯誤）
   'cast.framework.events.category.CORE': cast.framework.LoggerLevel.DEBUG,
-  
-  // 當媒體狀態改變（如換歌、播完）
   'cast.framework.events.EventType.MEDIA_STATUS': cast.framework.LoggerLevel.DEBUG
 };
 
 castDebugLogger.loggerLevelByTags = {
-  LOG_TAG: cast.framework.LoggerLevel.DEBUG,
+  [LOG_TAG]: cast.framework.LoggerLevel.DEBUG,
+  [PERF_METRIC]: cast.framework.LoggerLevel.DEBUG,
 };
 
 async function makeRequest(method, url) {
+  const api_start = performance.now();
+  castDebugLogger.info(PERF_METRIC, "  -> API Request Sent");
+  
   try {
     const response = await fetch(url, { method });
 
+    const api_end = performance.now();
+    const api_duration = (api_end - api_start).toFixed(2);
+    castDebugLogger.info(PERF_METRIC, `  <- API Response Received. Duration: ${api_duration}ms`);
+
     if (!response.ok) {
-      throw {
-        status: response.status,
-        statusText: response.statusText,
-      };
+      throw { status: response.status, statusText: response.statusText };
     }
     return await response.json();
   } catch (error) {
-    // 這裡會捕捉到網路錯誤或是上面 throw 的錯誤
     throw error; 
   }
 }
 
+// -----------------------------------------------------------------
+// 1. LOAD 攔截器 (監測 T0 -> T1)
+// -----------------------------------------------------------------
 playerManager.setMessageInterceptor(
   cast.framework.messages.MessageType.LOAD,
   async (request) => {
-    castDebugLogger.info(LOG_TAG, "Intercepting LOAD request");
+    // [T0] 啟動監測
+    t0_startTime = performance.now();
+    castDebugLogger.warn(PERF_METRIC, "T0: LOAD Request Received");
 
-    // Map contentId to entity (簡化賦值)
-    // for smart display, we use entity to identify the content, so we need to map it to contentId for later use
     if (request.media?.entity) {
       request.media.contentId = request.media.entity;
     }
 
     try {
-      // 2. 使用 await 呼叫我們先前改寫好的 makeRequest (fetch 版本)
       const data = await makeRequest("GET", SAMPLE_URL);
       const item = data[request.media.contentId];
 
       if (!item) {
         castDebugLogger.error(LOG_TAG, "Content not found");
-        // 在 interceptor 中拋出錯誤或回傳 null 即可停止載入
         return null; 
       }
 
-      // 3. 設定串流類型與 URL
       request.media.contentType = TEST_STREAM_TYPE;
-
       if (TEST_STREAM_TYPE === StreamType.DASH) {
         request.media.contentUrl = item.stream.dash;
       } else if (TEST_STREAM_TYPE === StreamType.HLS) {
@@ -86,37 +81,75 @@ playerManager.setMessageInterceptor(
         request.media.hlsVideoSegmentFormat = cast.framework.messages.HlsVideoSegmentFormat.FMP4;
       }
 
-      castDebugLogger.warn(LOG_TAG, "Playable URL:", request.media.contentUrl);
-
-      // 4. 設定 Metadata (使用物件簡寫)
       request.media.metadata = new cast.framework.messages.GenericMediaMetadata();
       request.media.metadata.title = item.title;
       request.media.metadata.subtitle = item.author;
 
-      // 5. 直接回傳修改後的 request，async 函數會自動包裝成 Resolved Promise
+      // [T1] 攔截器邏輯處理完成
+      const t1_time = performance.now();
+      const loadProcessDuration = (t1_time - t0_startTime).toFixed(2);
+      castDebugLogger.warn(PERF_METRIC, `T1: Data Ready. Process Duration: ${loadProcessDuration}ms`);
+
       return request;
 
     } catch (error) {
       castDebugLogger.error(LOG_TAG, "Request failed", error);
-      return null; // 發生錯誤時攔截並停止載入
+      return null;
     }
   }
 );
+
+// -----------------------------------------------------------------
+// 2. 監聽播放狀態 (監測 T2: 首幀出圖)
+// -----------------------------------------------------------------
+playerManager.addEventListener(
+  cast.framework.events.EventType.PLAYER_STATE_CHANGED,
+  (event) => {
+    if (event.playerState === cast.framework.messages.PlayerState.PLAYING && t0_startTime > 0) {
+      // [T2] 影片正式開始播放
+      const t2_time = performance.now();
+      const totalStartupTime = (t2_time - t0_startTime).toFixed(2);
+      
+      castDebugLogger.warn(PERF_METRIC, `T2: Video Playing (First Frame). Total Startup Latency: ${totalStartupTime}ms`);
+      
+      // 重置起始時間，避免重複計算 (例如暫停後再播放)
+      t0_startTime = 0;
+    }
+  }
+);
+
 // Optimizing for smart displays
 const touchControls = cast.framework.ui.Controls.getInstance();
 const playerData = new cast.framework.ui.PlayerData();
 const playerDataBinder = new cast.framework.ui.PlayerDataBinder(playerData);
 
-let browseItems = await getBrowseItems();
+// 獲取瀏覽項目並啟動
+getBrowseItems().then(browseItems => {
+  let browseContent = new cast.framework.ui.BrowseContent();
+  browseContent.title = "Up Next";
+  browseContent.items = browseItems;
+  browseContent.targetAspectRatio = cast.framework.ui.BrowseImageAspectRatio.LANDSCAPE_16_TO_9;
+
+  playerDataBinder.addEventListener(
+    cast.framework.ui.PlayerDataEventType.MEDIA_CHANGED,
+    (e) => {
+      if (!e.value) return;
+      touchControls.setBrowseContent(browseContent);
+      touchControls.clearDefaultSlotAssignments();
+      touchControls.assignButton(
+        cast.framework.ui.ControlsSlot.SLOT_PRIMARY_1,
+        cast.framework.ui.ControlsButton.SEEK_BACKWARD_30
+      );
+    }
+  );
+
+  context.start();
+});
 
 async function getBrowseItems() {
   try {
-    // 1. 等待資料抓取完成
     const data = await makeRequest("GET", SAMPLE_URL);
-    
-    // 2. 使用 .map() 代替 for...in，語法更簡潔且具備函數式編程風格
-    // Object.entries(data) 會同時給你 [key, value]
-    const browseItems = Object.entries(data).map(([key, value]) => {
+    return Object.entries(data).map(([key, value]) => {
       const item = new cast.framework.ui.BrowseItem();
       item.entity = key;
       item.title = value.title;
@@ -125,35 +158,8 @@ async function getBrowseItems() {
       item.imageType = cast.framework.ui.BrowseImageType.MOVIE;
       return item;
     });
-
-    return browseItems;
   } catch (error) {
     console.error("Failed to fetch browse items:", error);
-    return []; // 發生錯誤時回傳空陣列，防止程式崩潰
+    return [];
   }
 }
-
-let browseContent = new cast.framework.ui.BrowseContent();
-browseContent.title = "Up Next";
-browseContent.items = browseItems;
-browseContent.targetAspectRatio =
-  cast.framework.ui.BrowseImageAspectRatio.LANDSCAPE_16_TO_9;
-
-playerDataBinder.addEventListener(
-  cast.framework.ui.PlayerDataEventType.MEDIA_CHANGED,
-  (e) => {
-    if (!e.value) return;
-
-    // Media browse
-    touchControls.setBrowseContent(browseContent);
-
-    // Clear default buttons and re-assign
-    touchControls.clearDefaultSlotAssignments();
-    touchControls.assignButton(
-      cast.framework.ui.ControlsSlot.SLOT_PRIMARY_1,
-      cast.framework.ui.ControlsButton.SEEK_BACKWARD_30
-    );
-  }
-);
-
-context.start();
